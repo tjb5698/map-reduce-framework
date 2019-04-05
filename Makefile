@@ -7,6 +7,7 @@ tests = 1.txt 2.txt
 
 INPUT_PATH=input
 OUTPUT_PATH=output
+TRUTH_PATH=output_compare
 
 t=5
 
@@ -24,4 +25,7 @@ tests:
 		./$(OUT) $(INPUT_PATH)/$$test $(OUTPUT_PATH)/$$test $t || exit 1
 	done
 	
-
+compare:
+	for test in $(TESTS); do 
+		python3 compare.py $(OUTPUT_PATH)/$$test $(TRUTH_PATH)/$$test
+	done
