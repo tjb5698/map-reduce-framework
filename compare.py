@@ -5,7 +5,7 @@ import sys
 import os
 
 if len(sys.argv) < 3:
-    print("Usage: %s [input1] [input2] \n\t\tto check whether the two inputs are equivalent" % sys.argv[0])
+    print("Usage: %s [input1] [input2] \n\t\tto check whether the two inputs are equivalent\n" % sys.argv[0])
         
 os.system("(echo \"word, count\" && cat %s) > /tmp/1" %sys.argv[1])
 os.system("(echo \"word, count\" && cat %s) > /tmp/2" %sys.argv[2])
