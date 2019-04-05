@@ -27,5 +27,5 @@ tests:
 	
 compare:
 	for test in $(TESTS); do 
-		python3 compare.py $(OUTPUT_PATH)/$$test $(TRUTH_PATH)/$$test
+		python3 ../compare.py $(OUTPUT_PATH)/$$test $(TRUTH_PATH)/$$test
 	done
