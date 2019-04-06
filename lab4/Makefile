@@ -1,5 +1,6 @@
 OUT = mr-wordc
-CFLAGS = -std=gnu99
+OUTS = mr-wordc mr-trace mr-sleep
+CFLAGS = -std=gnu99 -pthread
 SOURCES = mapreduce.c
 LIBS =
 
@@ -13,14 +14,20 @@ t=5
 
 .PHONY: default
 
-default: mr-wordc
+default: $(OUTS)
 
-mr-wordc: mapreduce.h
-	gcc -Wall -g $(CFLAGS) $(SOURCES) bin/mr-wordc.o $(LIBS) -o $@
+mr-wordc: $(SOURCES)
+	gcc -Wall -g $(CFLAGS) $^ bin/mr-wordc.o $(LIBS) -o $@
 	mkdir -p output
 
+mr-trace: $(SOURCES)
+	gcc -Wall -g $(CFLAGS) $^ bin/mr-trace.o $(LIBS) -o $@
+
+mr-sleep: $(SOURCES)
+	gcc -Wall -g $(CFLAGS) $^ bin/mr-sleep.o $(LIBS) -o $@
+
 clean:
-	rm $(OUT)
+	rm -f $(OUTS)
 
 tests:
 	for test in $(TESTS); do
