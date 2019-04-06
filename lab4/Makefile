@@ -1,7 +1,7 @@
 OUT = mr-wordc
-OUTS = mr-wordc mr-trace mr-sleep
-CFLAGS = -std=gnu99 -pthread
-SOURCES = mapreduce.c
+OUTS = mr-wordc mr-trace mr-sleep mapreduce.o
+CFLAGS = -Wall -g -std=gnu99 -pthread
+SOURCES = mapreduce.o
 LIBS =
 
 tests = 1.txt 2.txt
@@ -16,15 +16,18 @@ t=5
 
 default: $(OUTS)
 
-mr-wordc: $(SOURCES)
-	gcc -Wall -g $(CFLAGS) $^ bin/mr-wordc.o $(LIBS) -o $@
+mr-wordc: $(SOURCES) bin/mr-wordc.o
+	gcc $(CFLAGS) $^ $(LIBS) -o $@
 	mkdir -p output
 
-mr-trace: $(SOURCES)
-	gcc -Wall -g $(CFLAGS) $^ bin/mr-trace.o $(LIBS) -o $@
+mr-trace: $(SOURCES) bin/mr-trace.o 
+	gcc $(CFLAGS) $^ $(LIBS) -o $@
 
-mr-sleep: $(SOURCES)
-	gcc -Wall -g $(CFLAGS) $^ bin/mr-sleep.o $(LIBS) -o $@
+mr-sleep: $(SOURCES) bin/mr-sleep.o 
+	gcc $(CFLAGS) $^ $(LIBS) -o $@
+
+mapreduce.o: mapreduce.c
+	gcc $(CFLAGS) -c $^ $(LIBS) -o $@ 
 
 clean:
 	rm -f $(OUTS)
