@@ -157,7 +157,9 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv);
  * kv  Pointer to the key-value pair that was produced by Map.  The caller is
  *     responsible for allocating memory for the key and value ahead of time and
  *     setting the pointer and size fields for each to the location and size of
- *     the allocated buffer.
+ *     the allocated buffer. After, the data has been read into the pair, this
+ *     function should update the size fields to reflect the actual size of the
+ *     data.
  *
  * Returns 1 if one pair is successfully consumed, 0 if the Map thread returns
  * without producing any more pairs, or -1 on error.
