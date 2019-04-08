@@ -1,10 +1,11 @@
 #!/bin/bash
 
 testThreads=32
+bufferSize=1000
 
 failures=0
 
-if make
+if make mr-wordc
 then
   inputDir="input/mr-wordc"
   outputDir="output/mr-wordc"
@@ -23,7 +24,7 @@ then
     outputCompareFile="./${compareDir}/${file}"
     outFile="./${outputDir}/out/${file}"
     diffFile="./${outputDir}/diffs/${file}"
-    { ./mr-wordc "${inputFile}" "${outputFile}" "${testThreads}" ; } &> "${outFile}"
+    { ./mr-wordc "${inputFile}" "${outputFile}" "${testThreads}" "${bufferSize}" ; } &> "${outFile}"
     if diff "${outputFile}" "${outputCompareFile}" > "${diffFile}"
     then
       echo "Test Case mr-wordc ${type} ${inputFile} passed"
