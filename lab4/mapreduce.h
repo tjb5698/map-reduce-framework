@@ -94,7 +94,7 @@ struct kvpair {
  *
  * map      Pointer to map callback function
  * reduce   Pointer to reduce callback function
- * threads  Number of worker threads to use
+ * threads  Number of mapper threads to use
  *
  * Returns a pointer to the newly allocated map_reduce structure on success, or
  * NULL to indicate failure.
