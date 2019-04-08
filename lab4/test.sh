@@ -1,27 +1,34 @@
 #!/bin/bash
 
-inputFiles=($(find input/ -type f -printf "%f\n" | sort | tr '\n' ' '))
+testThreads=32
 
 failures=0
 
 if make
 then
-  mkdir -p output
-  mkdir -p output/diffs
-  mkdir -p output/out
+  inputDir="input/mr-wordc"
+  outputDir="output/mr-wordc"
+  compareDir="output_compare/mr-wordc"
+
+  inputFiles=($(find "${inputDir}/" -type f -printf "%f\n" | sort | tr '\n' ' '))
+
+  mkdir -p "${outputDir}"
+  mkdir -p "${outputDir}/diffs"
+  mkdir -p "${outputDir}/out"
+
   for file in "${inputFiles[@]}"
   do
-    inputFile="./input/${file}"
-    outputFile="./output/${file}"
-    outputCompareFile="./output_compare/${file}"
-    outFile="./output/out/${file}"
-    diffFile="./output/diffs/${file}"
-    { ./mr-wordc "${inputFile}" "${outputFile}" 32 ; } &> "${outFile}"
+    inputFile="./${inputDir}/${file}"
+    outputFile="./${outputDir}/${file}"
+    outputCompareFile="./${compareDir}/${file}"
+    outFile="./${outputDir}/out/${file}"
+    diffFile="./${outputDir}/diffs/${file}"
+    { ./mr-wordc "${inputFile}" "${outputFile}" "${testThreads}" ; } &> "${outFile}"
     if diff "${outputFile}" "${outputCompareFile}" > "${diffFile}"
     then
-      echo "Test Case ${type} ${inputFile} passed"
+      echo "Test Case mr-wordc ${type} ${inputFile} passed"
     else
-      echo "Test Case ${type} ${inputFile} failed"
+      echo "Test Case mr-wordc ${type} ${inputFile} failed"
       echo "  Incorrect output for ${outputFile}. Check diff file."
       let failures++
     fi
@@ -37,4 +44,3 @@ then
 else
   echo "Make failed"
 fi
-

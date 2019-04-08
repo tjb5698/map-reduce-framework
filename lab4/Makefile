@@ -16,7 +16,6 @@ default: $(OUTS)
 
 mr-wordc: $(SOURCES) bin/mr-wordc.o
 	gcc $(CFLAGS) $^ $(LIBS) -o $@
-	mkdir -p output
 
 mr-trace: $(SOURCES) bin/mr-trace.o
 	gcc $(CFLAGS) $^ $(LIBS) -o $@
