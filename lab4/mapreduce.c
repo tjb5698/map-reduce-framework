@@ -11,7 +11,7 @@
 
 #include "mapreduce.h"
 
-struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads) {
+struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buffer_size) {
 
 }
 

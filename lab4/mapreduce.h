@@ -4,10 +4,12 @@
 /******************************************************************************
  * Definition of the MapReduce framework API.
  *
- * The ONLY change you may make to this file is to add your data members to the
- * map_reduce struct definition.  Making any other changes alters the API, which
- * breaks compatibility with all of the other programs that are using your
- * framework!
+ * The ONLY changes you may make to this file are to add your data members to
+ * the map_reduce struct definition.  Additionally, you are allowed to add
+ * #includes for any types you need. You may also add your own struct
+ * definitions.  Making any other changes to the function declarations below
+ * alters the API, which breaks compatibility with all of the other programs
+ * that are using your framework!
  *
  * Note: where the specification talks about the "caller", this is the program
  * which is not your code.  If the caller is required to do something, that
@@ -16,6 +18,10 @@
 
 /* Header includes */
 #include <stdint.h>
+#include <pthread.h>
+/* You may add additional includes here */
+
+/* End include section */
 
 /* Forward-declaration, the definition to edit is farther down */
 struct map_reduce;
@@ -48,13 +54,14 @@ typedef int (*map_fn)(struct map_reduce *mr, int infd, int id, int nmaps);
 typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
 
 
+/* You may add additional struct definitions here */
+
+/* End struct section */
+
 /*
  * Structure for storing any needed persistent data - do not use global
  * variables when writing a system!  You may put whatever data is needed by your
  * functions into this struct definition.
- *
- * The contents of this structure are the ONLY part of the mapreduce.h file that
- * you may change!
  *
  * This type is treated as "opaque" by the caller, which means the caller must
  * not manipulate it in any way other than passing its pointer back to your
@@ -92,14 +99,16 @@ struct kvpair {
  * function should allocate a map_reduce structure and any memory or resources
  * that may be needed by later functions.
  *
- * map      Pointer to map callback function
- * reduce   Pointer to reduce callback function
- * threads  Number of mapper threads to use
+ * map          Pointer to map callback function
+ * reduce       Pointer to reduce callback function
+ * threads      Number of mapper threads to use
+ * buffer_size  Size of the buffer between each mapper and the reducer
+ *              (in bytes)
  *
  * Returns a pointer to the newly allocated map_reduce structure on success, or
  * NULL to indicate failure.
  */
-struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads);
+struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buffer_size);
 
 /**
  * Destroys and cleans up an existing instance of the MapReduce framework.  Any
@@ -133,7 +142,8 @@ int mr_finish(struct map_reduce *mr);
 /**
  * Called by a Map thread each time it produces a key-value pair to be consumed
  * by the Reduce thread.  If the framework cannot currently store another
- * key-value pair, this function should block until it can.
+ * key-value pair, this function should block until it can. If the entry is
+ * larger than the entire buffer, then this function should fail (return -1).
  *
  * mr  Pointer to the MapReduce instance
  * id  Identifier of this Map thread, from 0 to (nmaps - 1)
