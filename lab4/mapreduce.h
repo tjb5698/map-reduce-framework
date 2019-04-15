@@ -17,6 +17,8 @@
  ******************************************************************************/
 
 /* Header includes */
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <pthread.h>
 /* You may add additional includes here */
@@ -68,7 +70,18 @@ typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
  * functions.
  */
 struct map_reduce {
-    /* add your fields here */
+    /* pointer to map callback function */
+    map_fn map;
+
+    /* pointer to reduce callback function */
+    reduce_fn reduce;
+
+    /* number of mapper threads to use */
+    int threads;
+
+    /* size of the buffer between each
+       mapper and the reducer in bytes */
+    int buffer_size;
 };
 
 /**
