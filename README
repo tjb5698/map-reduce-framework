@@ -1,0 +1,47 @@
+Name:
+Email:
+Name:
+Email:
+
+Concurrency Mechanisms:
+In this section, explain what concurrency mechanisms you used in your project.
+
+Producer-Consumer Problem:
+In this section, explain how you addressed the producer-consumer problem in
+implementing the buffer, `my_produce`, and `mr_consume`.
+
+Known Bugs:
+In this section, list any known bugs with your implementation, if any.
+
+Comments:
+Any other comments you have regarding your project.
+
+Statistics (Use microseconds):
+@Test: 0, perf-eval.txt, 1, 100, <min>
+@Test: 1, perf-eval.txt, 2, 100, <min>
+@Test: 2, perf-eval.txt, 4, 100, <min>
+@Test: 3, perf-eval.txt, 8, 100, <min>
+@Test: 4, perf-eval.txt, 16, 100, <min>
+@Test: 5, perf-eval.txt, 32, 100, <min>
+@Test: 6, perf-eval.txt, 64, 100, <min>
+@Test: 7, perf-eval.txt, 1, 1000, <min>
+@Test: 8, perf-eval.txt, 2, 1000, <min>
+@Test: 9, perf-eval.txt, 4, 1000, <min>
+@Test: 10, perf-eval.txt, 8, 1000, <min>
+@Test: 11, perf-eval.txt, 16, 1000, <min>
+@Test: 12, perf-eval.txt, 32, 1000, <min>
+@Test: 13, perf-eval.txt, 64, 1000, <min>
+@Test: 14, perf-eval.txt, 1, 10000, <min>
+@Test: 15, perf-eval.txt, 2, 10000, <min>
+@Test: 16, perf-eval.txt, 4, 10000, <min>
+@Test: 17, perf-eval.txt, 8, 10000, <min>
+@Test: 18, perf-eval.txt, 16, 10000, <min>
+@Test: 19, perf-eval.txt, 32, 10000, <min>
+@Test: 20, perf-eval.txt, 64, 10000, <min>
+
+Performance Evaluation:
+In this section, briefly discuss the results above, and how they
+support or contradict your intuitions/expectations.
+
+Sources Consulted:
+List any sources consulted.

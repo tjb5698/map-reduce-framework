@@ -1,7 +1,6 @@
 # the executables
 /mr-wordc
-/mr-sleep
-/mr-trace
+/mr-grep
 
 # object files
 /mapreduce.o
