@@ -47,8 +47,12 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 	/* set up thread block */
 	mr->theThreads        = malloc(threads * sizeof(pthread_t));
 	
-	//mr->buffer_space = buffer_size; Keeps track of space left in buffer
-	
+	//mr->buffer_space = buffer_size; 			Keeps track of space left in buffer
+	//mr->empty = 0					; 			signal from consumer to producer if buffer is empty
+    //mr->full = numBuffer			; 			signal from producer to consumer if buffer is full
+    //mr->bs_mutex					; 			lock for buffer space
+	//mr->Buff = malloc(Buff sizeof(buffer));	creating a buffer
+
 	/* return a pointer to the new map_reduce struct */
 	return mr;
 }
@@ -89,6 +93,7 @@ int mr_start(struct map_reduce *mr, const char *inpath, const char *outpath) {
 	return 0;
 }
 
+/* test function */
 void *helloWorld( void * thread_id )
 {
 	long tid = (long) thread_id;
@@ -101,31 +106,20 @@ int mr_finish(struct map_reduce *mr) {
 }
 
 int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
-//	kvpair produced by map fn
+//	kvpair produced by map fn = kv
 //	int kvsize = kv->keysz + kv->valuesz
 //	if (kvsize > mr->buffer_size)
 //		return -1;
 //	else 
 //		while (kv not stored: kvsize > buffer_space) 
-//			block mapper thread;		
+//			sem_wait(&empty);							// block mapper thread;		
 //		add kv pair to buffer
-//		mutex lock buffer_space
-//		update mr->buffer_space = mr->buffer_space - kvsize 
-//		mutex unlock buffer_space
-//		signal consumer
-//		return 1;	
+//		sem_wait(&mutex);								// mutex lock buffer_space
+//		mr->buffer_space = mr->buffer_space - kvsize 	// update buffer_space
+//		sem_post(&mutex);								// mutex unlock buffer_space
+//		sem_post(&full);								// signal consumer
+//		return 1;										// store successful
 //			
-
-
-	/* producer fn using semaphores */
-/*	int i;
-	for (i = 0; i < loops; i++) {
-		sem_wait(&empty); // Line P1
-		sem_wait(&mutex); // Line P1.5 (MOVED MUTEX HERE...)
-		put(i); // Line P2
-		sem_post(&mutex); // Line P2.5 (... AND HERE)
-		sem_post(&full); // Line P3
- 	} */
 
 	return -1;
 }
@@ -134,6 +128,7 @@ int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
 	return -1;
 }
 
+/* test function */
 void iofilefn(const char *inpath, const char *outpath) {
 	char str1[5],str2[5],str3[5];
 	FILE *fp = fopen(inpath,"r+");
@@ -149,6 +144,7 @@ void iofilefn(const char *inpath, const char *outpath) {
 	fprintf(fp1, "%s %s %s",str1,str2,str3);
 }
 
+/* for testing purposes */
 int main(){
 
 	/* test 1 - no map/reduce functions yet */

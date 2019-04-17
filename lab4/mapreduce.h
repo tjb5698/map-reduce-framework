@@ -85,6 +85,12 @@ struct map_reduce {
 
     /* array of mapper threads */
     pthread_t * theThreads;
+
+    // int buffer_space 	: space left in buffer
+    // buffer Buff 			: buffer to serve as a memory between mapper and reducer 
+    // sem_t empty			: signal from consumer to producer if buffer is empty
+    // sem_t full			: signal from producer to consumer if buffer is full
+    // sem_t bs_mutex		: lock for buffer_space
 };
 
 /**
@@ -102,6 +108,11 @@ struct kvpair {
     uint32_t keysz;
     uint32_t valuesz;
 };
+
+// typedef struct buffer_q{
+//	kvpair	kvp;
+//	int 	id;	
+//} buffer_q
 
 
 /*
