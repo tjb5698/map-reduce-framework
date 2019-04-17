@@ -70,18 +70,21 @@ typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
  * functions.
  */
 struct map_reduce {
-    /* pointer to map callback function */
+
+    /* pointer to  map   function */
     map_fn map;
 
-    /* pointer to reduce callback function */
+    /* pointer to reduce function */
     reduce_fn reduce;
 
-    /* number of mapper threads to use */
+    /* number of threads */
     int threads;
 
-    /* size of the buffer between each
-       mapper and the reducer in bytes */
+    /* buffer size in bytes */
     int buffer_size;
+
+    /* array of mapper threads */
+    pthread_t * theThreads;
 };
 
 /**
