@@ -20,7 +20,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 /* You may add additional includes here */
 
 /* End include section */
@@ -96,8 +100,12 @@ struct map_reduce {
 
     /* synchronization primitives */
     pthread_mutex_t lock_available_mutex;
+    pthread_mutex_t mrop_mutex;
     pthread_cond_t  lock_available_condition;
-    // pthread_cond_t  locker_empty_condition;
+    pthread_cond_t  lock_empty_condition;
+    pthread_cond_t  mrop_complete_condition;
+
+    int             map_status;
     
     // int buffer_space 	: space left in buffer
     // buffer Buff 			: buffer to serve as a memory between mapper and reducer 

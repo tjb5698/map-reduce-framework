@@ -72,13 +72,18 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 
 	/* allocate space for and initialize the condition
 	   variable and its corresponding mutex variable   */
-	mr->lock_available_mutex      = PTHREAD_MUTEX_INITIALIZER;
-	mr->lock_available_condition  = PTHREAD_COND_INITIALIZER;
+	mr->lock_available_mutex      = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+	mr->mrop_mutex                = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+	mr->lock_available_condition  = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+	mr->lock_empty_condition      = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+	mr->mrop_complete_condition   = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 
-	//mr->buffer_space = buffer_size; 			Keeps track of space left in buffer
-	//mr->empty = 0					; 			signal from consumer to producer if buffer is empty
-    //mr->full = numBuffer			; 			signal from producer to consumer if buffer is full
-    //mr->bs_mutex					; 			lock for buffer space
+	mr->map_status = 0;
+
+	//mr->buffer_space = buffer_size; 		Keeps track of space left in buffer
+	//mr->empty = 0				;	signal from consumer to producer if buffer is empty
+	//mr->full = numBuffer			;	signal from producer to consumer if buffer is full
+    	//mr->bs_mutex				;	lock for buffer space
 	//mr->Buff = malloc(Buff sizeof(buffer));	creating a buffer
 
 	/* return a pointer to the new map_reduce struct */
@@ -92,19 +97,39 @@ void mr_destroy(struct map_reduce *mr) {
 	}
 }
 
+void mr_start_helper(struct map_reduce *mr, int infd, int thread_id, int *retval)
+{
+	// the actual function call to map()
+	retval = &(mr->map(mr, infd, thread_id, mr->threads));	
+}
+
+void mr_reduce_helper(struct map_reduce *mr, int outfd, int *retval, int *reduce_count)
+{
+	// the actual function call to reduce()
+	retval = &(mr->reduce(mr, outfd, mr->threads));
+	if (retval == 0)
+		*reduce_count = + 1;
+	if (*reduce_count == mr->threads)
+		mr->map_status = 0;
+	pthread_cond_signal(& (mr->mrop_complete_condition));	//signal that done 
+
+}
+
 int mr_start(struct map_reduce *mr, const char *inpath, const char *outpath) {
 	int * retval;	// shared integer to capture return values
 	int * reduce_count = 0;
+	int * infd;
+	int * outfd;
 
 	for (int thread_id = 0; thread_id < mr->threads; thread_id++)
 	{
 		// get a pointer to the thread
-		pthread_t * mapThread = & ( (mr->theThreads)[thread_id] );
+		pthread_t * mapThread = & ( (mr->mapThreads)[thread_id] );
 
 		// todo: create inpath & outpath file descriptos
 		// see file i/o code from earlier :)
-		infd = open(inpath, O_RDONLY | O_CREAT);
-		if (infd == FAILURE){
+		*infd = open(inpath, O_RDONLY | O_CREAT);
+		if (*infd == FAILURE){
 			printf("File doesn't exist.\n");
 			return FAILURE;
 		}
@@ -121,12 +146,14 @@ int mr_start(struct map_reduce *mr, const char *inpath, const char *outpath) {
 			  	(void *)	retval);	/*    arg3    */
 
 		// stop if thread creation not successful
-		if (*retval != 0)
+		if (*retval != 0){
+			mr->map_status = -1;
 			return FAILURE;
+		}
 	}
 
-	outfd = open(outpath, O_APPEND | O_CREAT);
-	if (infd == FAILURE){
+	*outfd = open(outpath, O_APPEND | O_CREAT);
+	if (*outfd == FAILURE){
 			printf("File doesn't exist.\n");
 			return FAILURE;
 		}
@@ -142,27 +169,11 @@ int mr_start(struct map_reduce *mr, const char *inpath, const char *outpath) {
 					(void *) retval,
 					(void *) reduce_count);
 
-	if (*retval != 0)
+	if (*retval != 0){
+		mr->map_status = -1;
 		return FAILURE;
-	//signal received
+	}
 	return SUCCESS;
-}
-
-void mr_start_helper(struct map_reduce *mr, int infd, int thread_id, int *retval)
-{
-	// the actual function call to map()
-	retval = &(mr->map(mr, infd, thread_id, mr->threads));	
-}
-
-void mr_reduce_helper(struct map_reduce *mr, int outfd, int *retval, int *reduce_count)
-{
-	// the actual function call to reduce()
-	retval = &(mr->reduce(mr, outfd, mr->threads));
-	if (retval == 0)
-		reduce_count = + 1;
-	while (reduce_count < mr->threads)
-		//continue
-	//signal that done 
 }
 
 /* test function */
@@ -174,19 +185,22 @@ void mr_reduce_helper(struct map_reduce *mr, int outfd, int *retval, int *reduce
 }*/
 
 int mr_finish(struct map_reduce *mr) {
-	while (//condition)
-		//wait till done
-	for (i = 0; i < (mr->threads); i++)
-		int close_file = close(i)
+	if((mr->map_status) == -1)
+		return FAILURE;
 
+	while ((mr->map_status) != 0)
+		pthread_cond_wait( &(mr->mrop_complete_condition), & (mr->mrop_mutex) );
 
-	return -1;
+	for (int i = 0; i < (mr->threads); i++){
+		int close_file = close(i);
+	}
+	return 0;
 }
 
 int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
 
 	// check if buffer is too small to hold even a single kvpair
-	if (buffer_size < sizeof(struct kvpair))
+	if ((mr->buffer_size) < sizeof(struct kvpair))
 		return FAILURE;
 
 	// mutex lock??
@@ -201,7 +215,7 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
 	pthread_mutex_lock(& (mr->lock_available_mutex) );
 
 	// search for the empty locker
-	for (int i = 0; i < locker_count; i++)
+	for (int i = 0; i < (mr->locker_count); i++)
 	{
 		if (mr->locks[i] != LOCKED)
 		{
@@ -210,7 +224,7 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
 			mr->claims[id] = i;
 			mr->locks[i]   = LOCKED;
 			(mr->lockers_in_use)++;
-			pthread_cond_signal(& (mr->locker_empty_condition));
+			pthread_cond_signal(& (mr->lock_empty_condition));
 			pthread_mutex_unlock(&(mr->lock_available_mutex));
 			break;
 		}
@@ -228,7 +242,7 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
 	locker_contents->valuesz = kv->valuesz;
 
 	// store a pointer to the new kvpair in my locker
-	lockers[my_locker] = locker_contents;
+	mr->lockers[my_locker] = locker_contents;
 
 	// signal that there is something available to consume!
 
@@ -240,7 +254,7 @@ int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
 	while (mr->claims[id] == NO_CLAIM)
 	{
 		// wait on a CV for the locker contents itself
-		pthread_cond_wait(&(mr->locker_empty_condition), &(mr->lock_available_mutex));
+		pthread_cond_wait(&(mr->lock_empty_condition), &(mr->lock_available_mutex));
 		return 0;
 	}
 
@@ -260,6 +274,7 @@ int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
 	pthread_mutex_unlock(& (mr->lock_available_mutex));
 	
 	return SUCCESS;
+}
 /*
 	int my_locker = mr->claims[id];
 	for(int i = 0; i<locker_count; i++ ){
@@ -279,8 +294,10 @@ int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
 }
 */
 
+
+
 /* test function */
-void iofilefn(const char *inpath, const char *outpath) {
+/*void iofilefn(const char *inpath, const char *outpath) {
 	char str1[5],str2[5],str3[5];
 	FILE *fp = fopen(inpath,"r+");
 	if (fp == NULL){
@@ -293,14 +310,14 @@ void iofilefn(const char *inpath, const char *outpath) {
 		printf("file not found!");
 	}
 	fprintf(fp1, "%s %s %s",str1,str2,str3);
-}
+}*/
 
 /* for testing purposes */
-int main(){
+//int main(){
 
 	/* test 1 - no map/reduce functions yet */
 
-	struct map_reduce * mr = mr_create(NULL, NULL, 8, 8);
+/*	struct map_reduce * mr = mr_create(NULL, NULL, 8, 8);
 
 	if (mr->map == NULL)
 		printf("Map function is NULL!\n");
@@ -314,21 +331,21 @@ int main(){
 	mr_start(mr, NULL, NULL);
 
 	mr_destroy(mr); 
-
+*/
 	/* test 2 - invalid numerical inputs */
 
-	struct map_reduce * ms = mr_create(NULL, NULL, -1, 8);
+/*	struct map_reduce * ms = mr_create(NULL, NULL, -1, 8);
 
 	if (ms == NULL)
 		printf("map_reduce is NULL!\n");
 
 	mr_destroy(ms); 
-
+*/
 /*
 	char *inpath = "/home/ugrads/tjb5698/473/Lab4/lab4/testfile.txt" ;
 	char *outpath = "/home/ugrads/tjb5698/473/Lab4/lab4/output.txt" ;
 	iofilefn(inpath, outpath);
 */	
 
-	return 0;
-}
+//	return 0;
+//}
