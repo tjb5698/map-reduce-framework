@@ -72,20 +72,33 @@ typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
 struct map_reduce {
 
     /* pointer to  map   function */
-    map_fn map;
+    map_fn          map;
 
     /* pointer to reduce function */
-    reduce_fn reduce;
+    reduce_fn       reduce;
 
     /* number of threads */
-    int threads;
+    int             threads;
 
     /* buffer size in bytes */
-    int buffer_size;
+    int             buffer_size;
 
-    /* array of mapper threads */
-    pthread_t * theThreads;
+    /* array of map threads */
+    pthread_t     * mapThreads;
+    pthread_t     * reduceThread;
 
+    /* shared buffer */
+    int             locker_count;
+    int             lockers_in_use;
+    int           * claims;
+    struct kvpair * lockers;
+    bool          * locks;
+
+    /* synchronization primitives */
+    pthread_mutex_t lock_available_mutex;
+    pthread_cond_t  lock_available_condition;
+    // pthread_cond_t  locker_empty_condition;
+    
     // int buffer_space 	: space left in buffer
     // buffer Buff 			: buffer to serve as a memory between mapper and reducer 
     // sem_t empty			: signal from consumer to producer if buffer is empty
@@ -109,10 +122,10 @@ struct kvpair {
     uint32_t valuesz;
 };
 
-// typedef struct buffer_q{
+// typedef struct buffer{
 //	kvpair	kvp;
 //	int 	id;	
-//} buffer_q
+//}
 
 
 /*
