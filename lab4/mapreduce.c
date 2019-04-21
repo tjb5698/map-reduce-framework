@@ -11,25 +11,32 @@
 
 #include "mapreduce.h"
 
-#define SUCCESS   1
-#define FAILURE  -1
+#define SUCCESS    1
+#define FAILURE   -1
 
-#define NO_CLAIM -1
-#define LOCKED    true
+#define UNCLAIMED -1		// the locker is not claimed by any map thread
+#define LOCKED    true		// the locker is locked
+#define UNLOCKED  false		// the locker is not locked
 
-void * helloWorld( void * thread_id );
+bool debug = true;
+
+struct args
+{
+	struct map_reduce * mr;
+	int infd;
+	int outfd;
+	int thread_id;
+	int * reduce_count;
+	int retval;
+};
 
 struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buffer_size) {
 	
-	/* invalid map function */
-	//if (map == NULL)
-	//	return NULL;
+	/* invalid map or reduce function */
+	if (map == NULL || reduce == NULL)
+		return NULL;
 
-	/* invalid reduce function */
-	//if (reduce == NULL)
-	//	return NULL;
-
-	/* invalid thread count */
+	/* invalid map thread count */
 	if (threads < 1)
 		return NULL;
 
@@ -40,14 +47,18 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 	/* create a new map_reduce struct */
   	struct map_reduce * mr = malloc(sizeof(struct map_reduce));
 
-	/* malloc failed */
+	/* malloc had a bad day...or maybe a really good night */
 	if (mr == NULL)
 		return NULL;
 
-	/* initialize the initial values  */
+	/* set pointers to the map and reduce functions  */
 	mr->map          = map;
 	mr->reduce       = reduce;
-	mr->threads      = threads;
+
+	/* set number of map threads */
+	mr->map_count    = threads;
+	
+	/* set buffer size in bytes */
 	mr->buffer_size  = buffer_size;
 
 	/* set up thread pointer block */
@@ -57,16 +68,15 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 	/* set up the shared lockers (buffer) */
 	mr->locker_count = buffer_size/sizeof(struct kvpair);
 	mr->lockers      = malloc(mr->locker_count);
-	// mr->lockers   = malloc(mr->locker_count * sizeof(struct kvpair));
-	mr->locks 	 	 = malloc(mr->locker_count * sizeof(bool));
-	mr->claims       = malloc(mr->threads * sizeof(int));
+	mr->locks 	 = malloc(mr->locker_count * sizeof(bool));
+	mr->claims       = malloc(mr->map_count    * sizeof(int));
 
 	for (int i = 0; i < mr->locker_count; i++)
-		(mr->locks)[i] = !(LOCKED);
+		(mr->locks)[i] = UNLOCKED;
 
-	for (int j = 0; j < mr->threads; j++)
+	for (int j = 0; j < mr->map_count; j++)
 		// no mapper thread has claimed a locker
-		(mr->claims)[j] = NO_CLAIM;
+		(mr->claims)[j] = UNCLAIMED;
 
 	mr->lockers_in_use = 0;
 
@@ -79,6 +89,10 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 	mr->mrop_complete_condition   = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 
 	mr->map_status = 0;
+
+	/* initialize the file descriptor pointer block */
+	mr->infd  = malloc(mr->map_count * sizeof(int));
+	mr->outfd = malloc(                sizeof(int));
 
 	//mr->buffer_space = buffer_size; 		Keeps track of space left in buffer
 	//mr->empty = 0				;	signal from consumer to producer if buffer is empty
@@ -97,104 +111,153 @@ void mr_destroy(struct map_reduce *mr) {
 	}
 }
 
-void mr_start_helper(struct map_reduce *mr, int infd, int thread_id, int *retval)
+void * mr_start_helper(void * myArgs)
 {
+	struct map_reduce * mr = ((struct args *) myArgs)->mr;
+	int               infd = ((struct args *) myArgs)->infd;
+	int          thread_id = ((struct args *) myArgs)->thread_id;
+
 	// the actual function call to map()
-	retval = &(mr->map(mr, infd, thread_id, mr->threads));	
+	((struct args *)myArgs)->retval = mr->map(mr, infd, thread_id, mr->map_count);
+
+	return NULL;
 }
 
-void mr_reduce_helper(struct map_reduce *mr, int outfd, int *retval, int *reduce_count)
+void * mr_reduce_helper(void * myArgs)
 {
+	struct map_reduce * mr = ((struct args *) myArgs)->mr;
+	int              outfd = ((struct args *) myArgs)->outfd;
+        int     * reduce_count = ((struct args *) myArgs)->reduce_count;
+
 	// the actual function call to reduce()
-	retval = &(mr->reduce(mr, outfd, mr->threads));
-	if (retval == 0)
+	((struct args *)myArgs)->retval = mr->reduce(mr, outfd, mr->map_count);
+	
+	if (((struct args *)myArgs)->retval == 0)
 		*reduce_count = + 1;
-	if (*reduce_count == mr->threads)
+
+	if (*reduce_count == mr->map_count)
 		mr->map_status = 0;
+
 	pthread_cond_signal(& (mr->mrop_complete_condition));	//signal that done 
 
+	return NULL;
 }
 
 int mr_start(struct map_reduce *mr, const char *inpath, const char *outpath) {
-	int * retval;	// shared integer to capture return values
 	int * reduce_count = 0;
-	int * infd;
-	int * outfd;
 
-	for (int thread_id = 0; thread_id < mr->threads; thread_id++)
+	int infd, outfd;
+
+	struct args * myArgs = malloc(sizeof(struct args));
+
+	for (int thread_id = 0; thread_id < mr->map_count; thread_id++)
 	{
+		if (debug)
+			printf("Creating map thread %d\n", thread_id);
+
 		// get a pointer to the thread
 		pthread_t * mapThread = & ( (mr->mapThreads)[thread_id] );
 
-		// todo: create inpath & outpath file descriptos
-		// see file i/o code from earlier :)
-		*infd = open(inpath, O_RDONLY | O_CREAT);
-		if (*infd == FAILURE){
-			printf("File doesn't exist.\n");
+		printf("Opening file descriptor\n");
+
+		// create input file descriptor
+		infd = open(inpath, O_RDONLY | O_CREAT);
+
+		if (infd == FAILURE){
+			printf("Input file open error on map thread %d.\n", thread_id);
 			return FAILURE;
 		}
 		
-		// create the next map thread
-		/* map(mr, infd, id, nmaps): map function */
+		/* save the file descriptor so we can close it later */
+		mr->infd[thread_id] = infd;
+
+		/* create the next map thread
+			map(mr, infd, id, nmaps): map function */
+
+		myArgs->mr   = mr;
+		myArgs->infd = mr->infd[thread_id];
+		myArgs->thread_id = thread_id;
+
+		printf("Calling pthread_create\n");
 
 		pthread_create(mapThread,		/* the thread */
-					NULL,				/* attributes */
-					mr_start_helper,
-			  	(void *) mr,			/*    arg0    */
-			  	(void *)	infd, 		/*    arg1    */
-			 	(void *)	&thread_id, /*    arg2    */
-			  	(void *)	retval);	/*    arg3    */
+				NULL,			/* attributes */
+				mr_start_helper,
+			  (void *) myArgs);
 
 		// stop if thread creation not successful
-		if (*retval != 0){
+		if (myArgs->retval != 0){
+			printf("wtf\n");
 			mr->map_status = -1;
 			return FAILURE;
 		}
 	}
 
-	*outfd = open(outpath, O_APPEND | O_CREAT);
-	if (*outfd == FAILURE){
-			printf("File doesn't exist.\n");
-			return FAILURE;
-		}
-	
-	// create the reduce thread
+	printf("Opening output file descriptor\n");
+
+	/* create output file descriptor */
+	outfd = open(outpath, O_APPEND | O_CREAT);
+
+	if (outfd == FAILURE)
+	{
+		printf("Output file open error on reduce thread.\n");
+		return FAILURE;
+	}
+
+	/* save the file descriptor so we can close it later */
+	mr->outfd = &outfd;
+
+	printf("Calling pthread_create\n");
+
+	/* create the reduce thread */
+
+	myArgs->outfd = *(mr->outfd);
+	myArgs->reduce_count = reduce_count;
+
 	pthread_t * reduceThread = mr->reduceThread;
 
 	pthread_create(reduceThread,
-					NULL,
-					mr_reduce_helper,
-					(void *) mr,
-					(void *) outfd,
-					(void *) retval,
-					(void *) reduce_count);
+			NULL,
+			mr_reduce_helper,
+			(void *) myArgs);
+	printf("OK\n");
 
-	if (*retval != 0){
+	if (myArgs->retval != 0)
+	{
 		mr->map_status = -1;
+		printf("wtf\n");
 		return FAILURE;
 	}
-	return SUCCESS;
+return 0;
+//	return SUCCESS;
 }
 
-/* test function */
-/*void *helloWorld( void * thread_id )
+int mr_finish(struct map_reduce *mr) 
 {
-	long tid = (long) thread_id;
-	printf("Hello from thread %ld!\n", tid);
-	pthread_exit(NULL);
-}*/
-
-int mr_finish(struct map_reduce *mr) {
-	if((mr->map_status) == -1)
+	if((mr->map_status) == -1){
+		printf("unsuccessful map-reduce op.\n");
 		return FAILURE;
+	}
 
 	while ((mr->map_status) != 0)
 		pthread_cond_wait( &(mr->mrop_complete_condition), & (mr->mrop_mutex) );
 
-	for (int i = 0; i < (mr->threads); i++){
-		int close_file = close(i);
+	printf("made it past the wait.\n");
+	int file_close_err_count = 0;
+
+	for (int i = 0; i < (mr->map_count); i++)
+	{
+		file_close_err_count += close(mr->infd[i]);
 	}
-	return 0;
+	
+	if (file_close_err_count == 0)
+		printf("closed input files\n");
+	file_close_err_count += close(*(mr->outfd));
+	printf("closed outputfile with %d errors \n",file_close_err_count);
+
+	if (file_close_err_count == 0)
+		return 0;
+	return 1;
 }
 
 int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
@@ -231,18 +294,23 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
 	}
 
 	int my_locker 	   = mr->claims[id];
-	// lockers[my_locker] = kv;
-
 
 	// serialize the kvpair...using another kvpair!
 	struct kvpair * locker_contents = malloc(sizeof(struct kvpair));
-	locker_contents->key   = &(*(kv->key));
-	locker_contents->value = &(*(kv->value));
-	locker_contents->keysz = kv->keysz;
+
+	// allocate the key and the value using the keysz and valuesz in kv
+	locker_contents->key   = malloc(kv->keysz);
+	locker_contents->value = malloc(kv->valuesz);
+ 
+	locker_contents->key   = kv->key;
+	locker_contents->value = kv->value;
+
+	// update the keysz and valuesz in the locker contents
+	locker_contents->keysz   = kv->keysz;
 	locker_contents->valuesz = kv->valuesz;
 
-	// store a pointer to the new kvpair in my locker
-	mr->lockers[my_locker] = locker_contents;
+	// store the new locker contents in my locker
+	mr->lockers[my_locker] = *locker_contents;
 
 	// signal that there is something available to consume!
 
@@ -251,11 +319,10 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
 
 int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
 
-	while (mr->claims[id] == NO_CLAIM)
+	while (mr->claims[id] == UNCLAIMED)
 	{
 		// wait on a CV for the locker contents itself
 		pthread_cond_wait(&(mr->lock_empty_condition), &(mr->lock_available_mutex));
-		return 0;
 	}
 
 	// lock the locker contents with a mutex
@@ -264,11 +331,11 @@ int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
 	int my_locker = mr->claims[id];
 
 	// unserialize (or not really) the data
-	kv = mr->lockers[my_locker];
+	kv = &(mr->lockers[my_locker]);
 
 	mr->locks[my_locker] = !(LOCKED);
 	(mr->lockers_in_use)--;
-	mr->claims[id] = NO_CLAIM;
+	mr->claims[id] = UNCLAIMED;
 
 	pthread_cond_signal(& (mr->lock_available_condition));
 	pthread_mutex_unlock(& (mr->lock_available_mutex));
@@ -293,24 +360,6 @@ int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
 	}
 }
 */
-
-
-
-/* test function */
-/*void iofilefn(const char *inpath, const char *outpath) {
-	char str1[5],str2[5],str3[5];
-	FILE *fp = fopen(inpath,"r+");
-	if (fp == NULL){
-		printf("file not found!");
-	}
-	fscanf(fp, "%s %s %s",str1,str2,str3);
-
-	FILE *fp1 = fopen(outpath,"w+");
-	if (fp1 == NULL){
-		printf("file not found!");
-	}
-	fprintf(fp1, "%s %s %s",str1,str2,str3);
-}*/
 
 /* for testing purposes */
 //int main(){

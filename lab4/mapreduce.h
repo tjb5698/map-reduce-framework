@@ -25,13 +25,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-/* You may add additional includes here */
-
-/* End include section */
+#include <unistd.h>
 
 /* Forward-declaration, the definition to edit is farther down */
 struct map_reduce;
-
 
 /*
  * Type aliases for callback function pointers.  These are functions you will be
@@ -59,9 +56,6 @@ typedef int (*map_fn)(struct map_reduce *mr, int infd, int id, int nmaps);
  */
 typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
 
-
-/* You may add additional struct definitions here */
-
 /* End struct section */
 
 /*
@@ -81,8 +75,8 @@ struct map_reduce {
     /* pointer to reduce function */
     reduce_fn       reduce;
 
-    /* number of threads */
-    int             threads;
+    /* number of map threads */
+    int             map_count;
 
     /* buffer size in bytes */
     int             buffer_size;
@@ -98,13 +92,20 @@ struct map_reduce {
     struct kvpair * lockers;
     bool          * locks;
 
+    /* file descriptors */
+    int * infd;
+    int * outfd;
+
     /* synchronization primitives */
-    pthread_mutex_t lock_available_mutex;
     pthread_mutex_t mrop_mutex;
-    pthread_cond_t  lock_available_condition;
-    pthread_cond_t  lock_empty_condition;
     pthread_cond_t  mrop_complete_condition;
 
+    /* synchronization primitives */
+    pthread_mutex_t lock_available_mutex;
+    pthread_cond_t  lock_available_condition;
+    pthread_cond_t  lock_empty_condition;
+
+    /* */
     int             map_status;
     
     // int buffer_space 	: space left in buffer
@@ -129,12 +130,6 @@ struct kvpair {
     uint32_t keysz;
     uint32_t valuesz;
 };
-
-// typedef struct buffer{
-//	kvpair	kvp;
-//	int 	id;	
-//}
-
 
 /*
  * MapReduce function API
