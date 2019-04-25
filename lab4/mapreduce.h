@@ -1,3 +1,5 @@
+
+
 #ifndef MAPREDUCE_H_
 #define MAPREDUCE_H_
 
@@ -26,9 +28,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-/* Forward-declaration, the definition to edit is farther down */
-struct map_reduce;
 
 /*
  * Type aliases for callback function pointers.  These are functions you will be
@@ -68,33 +67,30 @@ typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
  * functions.
  */
 struct map_reduce {
-
-    /* pointer to  map   function */
+    /* pointers to map and reduce functions */
     map_fn          map;
-
-    /* pointer to reduce function */
     reduce_fn       reduce;
 
-    /* number of map threads */
+    /* the number of map and reduce threads */
     int             map_count;
+    int             reduce_count;
 
-    /* buffer size in bytes */
-    int             buffer_size;
-
-    /* array of map threads */
+    /* pointers to map and reduce threads   */
     pthread_t     * mapThreads;
     pthread_t     * reduceThread;
 
-    /* shared buffer */
+    /* buffer size in bytes     */
+    int             buffer_size;
+
+    /* shared lockers (buffers) */
     int             locker_count;
     int             lockers_in_use;
     int           * claims;
     struct kvpair * lockers;
     bool          * locks;
 
-    /* file descriptors */
-    int * infd;
-    int * outfd;
+    /* output file descriptor */
+    int outfd;
 
     /* synchronization primitives */
     pthread_mutex_t mrop_mutex;
@@ -107,12 +103,6 @@ struct map_reduce {
 
     /* */
     int             map_status;
-    
-    // int buffer_space 	: space left in buffer
-    // buffer Buff 			: buffer to serve as a memory between mapper and reducer 
-    // sem_t empty			: signal from consumer to producer if buffer is empty
-    // sem_t full			: signal from producer to consumer if buffer is full
-    // sem_t bs_mutex		: lock for buffer_space
 };
 
 /**
