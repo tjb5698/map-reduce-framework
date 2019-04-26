@@ -158,7 +158,7 @@ void *mr_map_helper(void *myArgs)
 		printf("%d - map threads done = %d\n",thread_id, mr->nmaps_done);
 		printf("%d - total map threads = %d\n",thread_id, mr->map_count);
 		/* the last map thread should turn off the lights and close and lock the door */
-		if (mr->nmaps_done >= 2)
+		if (mr->nmaps_done >= 1)
 		{
 			pthread_cond_signal(&(mr->map_complete_cv));
 		}
@@ -182,17 +182,17 @@ void *mr_reduce_helper(void *myArgs)
 	/* loop until all of the maps are done */
 //	while (mr->nmaps_done <= mr->map_count)
 //	{
-//	while(mr->nmaps_done < (mr->map_count-1))
-//	{
+	while(mr->nmaps_done < (mr->map_count-1))
+	{
 		printf("Reduce waiting for map thread to complete\n");
 		/* wait for a map thread to complete */
 		
 		pthread_cond_wait(&(mr->map_complete_cv), &(mr->map_complete_mutex));
 		printf("Done waiting\n");
 		/* call the reduce function */
-//		((struct args *) myArgs)->reduce_create_retval = (mr->reduce)(mr, outfd, mr->map_count);
-//	}
-	((struct args *) myArgs)->reduce_create_retval = (mr->reduce)(mr, outfd, mr->map_count);
+		((struct args *) myArgs)->reduce_create_retval = (mr->reduce)(mr, outfd, mr->map_count);
+	}
+//	((struct args *) myArgs)->reduce_create_retval = (mr->reduce)(mr, outfd, mr->map_count);
 	
 //	if (mr->nmaps_done != mr->map_count)
 //	{
@@ -248,7 +248,11 @@ int mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
 
 		return 1;
 	}
-
+	if (mr->nmaps_done == mr->map_count)
+	{
+		pthread_cond_signal(&(mr->mapreduce_complete_cv));
+		return 0;		
+	}
 	/* declare the input file descriptor */
 	int infd;
 
@@ -340,10 +344,11 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv)
 		return -1;
 	}
 	
-	printf("%d - kvpair fit sin buffer\n",id);	
-
+	printf("%d - kvpair fits in buffer\n",id);	
+	//printf("%d - %d lockers in use right now\n",id, mr->lockers_in_use);
+	//printf("%d - there are total %d lockers\n", id, locker_count(mr));
 	/* if all the lockers are in use, wait until a locker is available */
-	if (mr->lockers_in_use == locker_count(mr))
+	while (mr->lockers_in_use == locker_count(mr))
 	{
 		printf("%d - Waiting for a locker to be emptied\n",id);
 		pthread_cond_wait(&(mr->locker_full_cv), &(mr->locker_full_mutex));
@@ -354,7 +359,7 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv)
 	pthread_mutex_lock(&(mr->locks_mutex));
 
 	/* search for the empty locker */
-	for (int i = 0; i < mr->locker_count; i++)
+	for (int i = 0; i < locker_count(mr); i++)
 	{
 		if (mr->locks[i] != LOCKED)
 		{
@@ -402,11 +407,20 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv)
 
 int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv)
 {
-	printf("%d - entered mr produce\n",id);
+	printf("%d - Entered mr consume\n",id);
 	/* wait until the locker has data */
-	while(mr->claims[id] == UNCLAIMED)
+	if(mr->nmaps_done == mr->map_count)
 	{
-		printf("id = %d: Waiting for locker to be filled",id);
+		return 1;	
+	}
+	
+	if(mr->claims[id] == UNCLAIMED)
+	{
+		return 0;
+	}
+	while(mr->lockers_in_use == 0)
+	{
+		printf("id = %d: Waiting for locker to be filled\n",id);
 		pthread_cond_wait(&(mr->locker_empty_cv), &(mr->locker_empty_mutex));
 	}
 	
@@ -421,11 +435,11 @@ int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv)
 	/* mark the locker as unlocked and unclaimed*/
 	pthread_mutex_lock(&(mr->locks_mutex));
 	mr->locks[my_locker] = !(LOCKED);
-	printf("%d - Locker %d is now unloacked\n",id,my_locker);
+	printf("%d - Locker %d is now unlocked\n",id,my_locker);
 	(mr->lockers_in_use)--;
-	printf("%d - %d lockers are in use",id,mr->lockers_in_use);
+	printf("%d - %d lockers are in use\n",id,mr->lockers_in_use);
 	mr->claims[id] = UNCLAIMED;
-	printf("%d - I dont have a locker",id);
+	printf("%d - I dont have a locker and now my claim is %d\n",id,mr->claims[id]);
 	pthread_mutex_unlock(&(mr->locks_mutex));
 
 	/* signal that a locker is now empty */
