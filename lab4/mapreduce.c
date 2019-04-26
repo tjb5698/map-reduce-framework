@@ -11,74 +11,21 @@
 
 #include "mapreduce.h"
 
-#define SUCCESS    1
-#define FAILURE   -1
-
 #define UNCLAIMED -1		// the locker is not claimed by any map thread
 #define LOCKED    true		// the locker is locked
 #define UNLOCKED  false		// the locker is not locked
-
-bool debug = true;
 
 struct args
 {
 	struct map_reduce * mr;
 	int thread_id;
-	int * reduce_count;
-	int retval;
+	int map_create_retval;
+	int reduce_create_retval;
 	int infd;
 	int outfd;
 };
 
 int locker_count(struct map_reduce *mr);
-
-/*
-void sumarray_map( map_args_t * args_test ) {
-    int nChunkSize  = args_test->length;
-    // cout << "Map chunk size is " << nChunkSize << endl;
-    int * miniArray = (int*) args_test->data;
-  
-    // cout << "Calculating intermediate sum over " << nChunkSize << " elements: " ;
-  
-    int intermediate_sum = 0;
-    for(int i=0;i<nChunkSize;i++) {
-      intermediate_sum += miniArray[i];
-    }
-  
-    // cout << intermediate_sum << endl;
-  
-    int * key = (* int)1;
- //   *key = 1;
-  
-    int * val = (* int)intermediate_sum;
-//    *val = intermediate_sum;
-  
-    // cout << "Emitting intermediate <" << *key << "," << *val << ">" << endl;
-    store_temp( key, val, sizeof( int* ) );
-  }
-
-void sumarray_reduce( void * key_in, void ** vals_in, int vals_len ) {
-    int nElements = vals_len;
-    int ** p_array = (int**) vals_in;
-    int * p_key = (int*) key_in;
-  
-    delete (p_key);
-  
-    int sum = 0;
-    for(int i=0;i<nElements;i++) {
-      sum += p_array[i][0];
-      delete p_array[i];
-    }
-  
-    int * key = new int;
-    *key = 0;
- 
-    int * val = new int;
-    *val = sum;
-  
-    store( key, val );
-  }
-*/
 
 struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buffer_size)
 {
@@ -90,7 +37,7 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 	if (threads < 1)
 		return NULL;
 
-	/* invalid buffer size */
+	/* invalid buffer size            */
 	if (buffer_size < 1)
 		return NULL;
 
@@ -106,8 +53,15 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 
 	/* set number of map threads   */
 	mr->map_count    = threads;
-        mr->reduce_count = 1;
+    mr->reduce_count = 1;
 	
+	/* no maps are done yet */
+	mr->nmaps_done   = 0;
+
+	/* mutex for nmaps_done */
+	mr->nmaps_done_mutex
+			         = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+
 	/* set up thread pointer block */
 	mr->mapThreads   = malloc((mr->map_count   ) * sizeof(pthread_t));
 	mr->reduceThread = malloc((mr->reduce_count) * sizeof(pthread_t));
@@ -116,34 +70,54 @@ struct map_reduce *mr_create(map_fn map, reduce_fn reduce, int threads, int buff
 	mr->buffer_size  = buffer_size;
 
 	/* create the shared lockers (buffers) */
-	mr->lockers      = malloc( locker_count(mr) * sizeof(struct kvpair) );
+	mr->lockers      = malloc(locker_count(mr) * sizeof(struct kvpair));
 	
 	/* set up the locks for the shared buffers */
-	mr->locks 	 = malloc( locker_count(mr) * sizeof(bool));
+	mr->locks 	     = malloc(locker_count(mr) * sizeof(bool));
 
 	for (int i = 0; i < locker_count(mr); i++)
-		// initially, every locker is unlocked
+	{
+		/* initially, every locker is unlocked */
 		(mr->locks)[i] = UNLOCKED;
+	}
 
 	/* set up the claims list for the shared buffer */
 	mr->claims       = malloc(mr->map_count    * sizeof(int));
 
 	for (int j = 0; j < mr->map_count; j++)
-		// no mapper thread has claimed a locker
+	{
+		/* initially, every locker is unclaimed */
 		(mr->claims)[j] = UNCLAIMED;
+	}
 
 	/* initially, there are no lockers in use */
 	mr->lockers_in_use = 0;
 
-	/* allocate space for and initialize the condition
-	   variable and its corresponding mutex variable   */
-	mr->lock_available_mutex      = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
-	mr->mrop_mutex                = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
-	mr->lock_available_condition  = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
-	mr->lock_empty_condition      = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
-	mr->mrop_complete_condition   = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+	/* mutex for locks array */
+	mr->locks_mutex			  = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
 
-	mr->map_status = 0;
+	/* condition variables and their mutex buddies */
+
+	/* is the lock  full? */
+	mr->locker_full_mutex  = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+	mr->locker_full_cv     = (pthread_cond_t)  PTHREAD_COND_INITIALIZER;
+
+	/* is the locker empty? */
+	mr->locker_empty_mutex  = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+	mr->locker_empty_cv     = (pthread_cond_t)  PTHREAD_COND_INITIALIZER;
+
+    /* is the map thread done? */
+	mr->map_complete_mutex    = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+	mr->map_complete_cv       = (pthread_cond_t) PTHREAD_COND_INITIALIZER;
+
+	/* is the mapreduce operation done? */
+	mr->mapreduce_complete_mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+	mr->mapreduce_complete_cv    = (pthread_cond_t) PTHREAD_COND_INITIALIZER;
+
+	/* mapreduce status code */
+	mr->status_code = 0;
+
+	printf("Created mr framework\n");
 
 	/* return a pointer to the new map_reduce struct */
 	return mr;
@@ -153,7 +127,7 @@ int locker_count(struct map_reduce *mr)
 {
 	if (mr == NULL)
 		return -1;
-	return mr->buffer_size / sizeof(struct kvpair);
+	return mr->buffer_size/sizeof(struct kvpair);
 }
 
 void mr_destroy(struct map_reduce *mr)
@@ -164,331 +138,299 @@ void mr_destroy(struct map_reduce *mr)
 	}
 }
 
-void * mr_start_helper(void * myArgs)
+void *mr_map_helper(void *myArgs)
 {
-
-	struct map_reduce * mr = ((struct args *) myArgs)->mr;
+	/* set up the arguments for the map function */
+	struct map_reduce *mr  = ((struct args *) myArgs)->mr;
 	int               infd = ((struct args *) myArgs)->infd;
 	int          thread_id = ((struct args *) myArgs)->thread_id;
 
-	// the actual function call to map()
-	((struct args *)myArgs)->retval = mr->map(mr, infd, thread_id, mr->map_count);
+	/* call the map function */
+	((struct args *) myArgs)->map_create_retval = (mr->map)(mr, infd, thread_id, mr->map_count);
 
+	/* update the number of maps done */
+	if (((struct args *)myArgs)->map_create_retval == 0)
+	{
+		pthread_mutex_lock(&(mr->nmaps_done_mutex));
+		(mr->nmaps_done)++;
+		pthread_mutex_unlock(&(mr->nmaps_done_mutex));
+		
+		printf("%d - map threads done = %d\n",thread_id, mr->nmaps_done);
+		printf("%d - total map threads = %d\n",thread_id, mr->map_count);
+		/* the last map thread should turn off the lights and close and lock the door */
+		if (mr->nmaps_done >= 2)
+		{
+			pthread_cond_signal(&(mr->map_complete_cv));
+		}
+	}
+
+	/* the null pointer! */
 	return NULL;
 }
 
-void * mr_reduce_helper(void * myArgs)
+void *mr_reduce_helper(void *myArgs)
 {
-	printf("Entered reduce helper\n");	
-
-	struct map_reduce * mr = ((struct args *) myArgs)->mr;
+	/* set up the arguments for the reduce function */
+	struct map_reduce *mr  = ((struct args *) myArgs)->mr;
 	int              outfd = ((struct args *) myArgs)->outfd;
-        int     * reduce_count = ((struct args *) myArgs)->reduce_count;
+
+	printf("Another statement\n");
+	//printf("Total number of map threads = %d \n",mr->map_count);
+
+	//printf("Number of map threads done = %d \n",mr->nmaps_done);
+
+	/* loop until all of the maps are done */
+//	while (mr->nmaps_done <= mr->map_count)
+//	{
+//	while(mr->nmaps_done < (mr->map_count-1))
+//	{
+		printf("Reduce waiting for map thread to complete\n");
+		/* wait for a map thread to complete */
+		
+		pthread_cond_wait(&(mr->map_complete_cv), &(mr->map_complete_mutex));
+		printf("Done waiting\n");
+		/* call the reduce function */
+//		((struct args *) myArgs)->reduce_create_retval = (mr->reduce)(mr, outfd, mr->map_count);
+//	}
+	((struct args *) myArgs)->reduce_create_retval = (mr->reduce)(mr, outfd, mr->map_count);
 	
-//	printf("Entered reduce_helper\n");
-	// the actual function call to reduce()
-	((struct args *)myArgs)->retval = mr->reduce(mr, outfd, mr->map_count);
+//	if (mr->nmaps_done != mr->map_count)
+//	{
+//		pthread_cond_wait(&(map_complete_cv), &(map_complete_mutex));
+//	}
 
-	printf("Returned from reduce fn\n");	
-
-	if (((struct args *)myArgs)->retval == 0)
-		*reduce_count = + 1;
-
-	if (*reduce_count == mr->map_count)
-		mr->map_status = 0;
-
-	pthread_cond_signal(& (mr->mrop_complete_condition));	//signal that done 
-
+	/* the null pointer! */
 	return NULL;
 }
 
 int mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
 {
-	int * reduce_count = 0;
+	printf("Entered mr_start\n");
 
-	int infd;
-
-	struct args * myArgs = malloc(sizeof(struct args));
-
-	for (int thread_id = 0; thread_id < mr->map_count; thread_id++)
-	{
-		if (debug)
-			printf("Creating map thread %d\n", thread_id);
-
-		// get a pointer to the thread
-		pthread_t * mapThread = & ( (mr->mapThreads)[thread_id] );
-
-		printf("Opening file descriptor\n");
-
-		// create input file descriptor
-		infd = open(inpath, O_RDONLY); 
-
-		if (infd == FAILURE){
-			printf("Input file open error on map thread %d.\n", thread_id);
-			return FAILURE;
-		}
-		
-		/* create the next map thread
-			map(mr, infd, id, nmaps): map function */
-
-		myArgs->mr   = mr;
-		myArgs->infd = infd;
-		myArgs->thread_id = thread_id;
-
-		printf("Calling pthread_create for map thread\n");
-
-		pthread_create(mapThread,		// the thread
-				NULL,			// attributes
-				mr_start_helper,
-			  (void *) myArgs);
-
-		// stop if thread creation not successful
-		if (myArgs->retval != 0){
-			printf("wtf\n");
-			mr->map_status = -1;
-			return FAILURE;
-		}
-	}
-
-	printf("Opening output file descriptor\n");
-
-	/* create output file descriptor */
+	/* try to initialize the output file descriptor */
 	mr->outfd = open(outpath, O_WRONLY | O_CREAT, S_IRWXU);
 
-	if (mr->outfd < SUCCESS)
+	/* check for errors */
+	if (mr->outfd < 0)
 	{
-		printf("Output file open error on reduce thread.\n");
-		return FAILURE;
+		printf("I couldn't open the output file descriptor for the reduce thread.\n");
+		
+		mr->status_code = 1;
+
+		/* signal that the mapreduce workflow is done */
+		pthread_cond_signal(&(mr->mapreduce_complete_cv));
+
+		return 1;
 	}
 
-	printf("Calling pthread_create for reduce thread\n");
+	/* get a pointer to the reduce thread */
+	pthread_t *reduceThread  = mr->reduceThread;
+
+	/* set up the reduce_args struct */
+	struct args *reduce_args = malloc(sizeof(struct args));
+	
+	reduce_args->mr			  =mr;
+	reduce_args->outfd 		  = mr->outfd;
+	reduce_args->reduce_create_retval = 0;
 
 	/* create the reduce thread */
+	pthread_create(reduceThread, NULL, mr_reduce_helper, (void *) reduce_args);
 
-	myArgs->outfd = mr->outfd;
-	myArgs->reduce_count = reduce_count;
-
-	pthread_t * reduceThread = mr->reduceThread;
-
-	pthread_create(reduceThread,
-			NULL,
-			mr_reduce_helper,
-			(void *) myArgs);
-	printf("OK\n");
-
-	if (myArgs->retval != 0)
+	/* check for errors */
+	if (reduce_args->reduce_create_retval != 0)
 	{
-		mr->map_status = -1;
-		printf("wtf\n");
-		return FAILURE;
+		printf("I couldn't create the reduce thread.\n");
+
+		mr->status_code = 1;
+
+		/* signal that the mapreduce workflow is done */
+		pthread_cond_signal(&(mr->mapreduce_complete_cv));
+
+		return 1;
 	}
+
+	/* declare the input file descriptor */
+	int infd;
+
+	/* create the map threads */
+	for (int thread_id = 0; thread_id < mr->map_count; thread_id++)
+	{
+		printf("%d - creating file descriptor\n",thread_id);
+		/* get a pointer to the next map thread */
+		pthread_t *mapThread = &((mr->mapThreads)[thread_id]);
+
+		/* try to initialize the input file descriptor */
+		infd = open(inpath, O_RDONLY); 
+
+		if (infd < 0)
+		{
+			printf("I couldn't open the input file descriptor for the map thread with id =%d.\n", thread_id);
+
+			mr->status_code = 1;
+
+			/* signal that the mapreduce workflow is done */
+			pthread_cond_signal(&(mr->mapreduce_complete_cv));
+
+			return 1;
+		}
+		
+		printf("%d - input file opened successfully\n",thread_id);
+		/* set up the map_args struct */
+		struct args *map_args   = malloc(sizeof(struct args));
+
+		map_args->mr        = mr;
+		map_args->infd      = infd;
+		map_args->thread_id = thread_id;
+		map_args->map_create_retval = 0;
+
+		/* create the next map thread */
+		pthread_create(mapThread, NULL, mr_map_helper, (void *) map_args);
+
+		/* check for errors */
+		if (map_args->map_create_retval != 0)
+		{
+			printf("I couldn't create the map thread with id=%d.\n", thread_id);
+
+			mr->status_code = 1;
+
+			/* signal that the mapreduce workflow is done */
+			pthread_cond_signal(&(mr->mapreduce_complete_cv));
+
+			return 1;
+		}
+	}
+
+	// done
 	return 0;
-//	return SUCCESS;
 }
 
 int mr_finish(struct map_reduce *mr) 
 {
-
-	if((mr->map_status) == -1){
-		printf("unsuccessful map-reduce op.\n");
-		return FAILURE;
-	}
-
-	while ((mr->map_status) != 0)
-		pthread_cond_wait( &(mr->mrop_complete_condition), & (mr->mrop_mutex) );
-
-	printf("made it past the wait.\n");
-
-
-	if (close(mr->outfd) < 0)
+	/* the cookie monster ate all the cookies */
+	if(mr->status_code == 0)
 	{
-		printf("Error closing output file descriptor.\n");
-		return 1;
+		/* wait until the entire mapreduce workflow is complete */
+		pthread_cond_wait(&(mr->mapreduce_complete_cv), &(mr->mapreduce_complete_mutex));
+
+		/* try to close the output file descriptor */
+		if (close(mr->outfd) < 0)
+		{
+			printf("I couldn't close the output file descriptor.\n");
+			mr->status_code = 1;
+		}
 	}
 
-	printf("Closing output file descriptor.\n");
-	return 0;
+	return mr->status_code;
 }
 
-int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv) {
-	
-	printf("%d - max kvpair size is %d\n",id,sizeof(struct kvpair));
-	int size = kv->keysz + kv->valuesz;
-	printf("%d - actual kv pair size is %d\n",id,size);	
-	//mr->locker_count = 3;
-	printf("%d - Entered mr produce.\n", id);
- 
-	// check if buffer is too small to hold even a single kvpair
-	if ((mr->buffer_size) < sizeof(struct kvpair)){
-		printf("%d - kv pair too big.\n", id);
-		return FAILURE;
-	}
-	// mutex lock??
-	printf("%d - Buffer size is big enough.\n",id);
-	// if all the lockers are in use, wait until a locker is available
-	while (mr->lockers_in_use == locker_count(mr))
+int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv)
+{
+	printf("%d - Entered mr_produce\n",id);
+
+	/* check if buffer is too small to hold even a single kvpair */
+	if ((mr->buffer_size) < sizeof(struct kvpair))
 	{
-		printf("%d - All lockers are full.\n", id);
-		pthread_cond_wait( &(mr->lock_available_condition), & (mr->lock_available_mutex) );
+		printf("Square pegs don't go in round holes.\n");
+		
+		mr->status_code = 1;
+
+		/* signal that the mapreduce workflow is done */
+		pthread_cond_signal(&(mr->mapreduce_complete_cv));
+
+		return -1;
+	}
+	
+	printf("%d - kvpair fit sin buffer\n",id);	
+
+	/* if all the lockers are in use, wait until a locker is available */
+	if (mr->lockers_in_use == locker_count(mr))
+	{
+		printf("%d - Waiting for a locker to be emptied\n",id);
+		pthread_cond_wait(&(mr->locker_full_cv), &(mr->locker_full_mutex));
 	}
 
-	// a locker is available
-	pthread_mutex_lock(& (mr->lock_available_mutex) );
-	printf("%d - A locker is available!\n", id);
+	printf("%d - locker is available\n",id);
+	/* a locker is available! */
+	pthread_mutex_lock(&(mr->locks_mutex));
 
-	// search for the empty locker
-	for (int i = 0; i < (locker_count(mr)); i++)
+	/* search for the empty locker */
+	for (int i = 0; i < mr->locker_count; i++)
 	{
 		if (mr->locks[i] != LOCKED)
 		{
-			// we found an unlocked locker!
-			// "mine mine mine" (Finding Nemo reference)
-			printf("%d - Locker %d is unlocked.\n",id,i);
+			printf("%d - claimed locker %d and locks it.\n",id,i); 
+			/* we found an unlocked locker! */
 			mr->claims[id] = i;
-			mr->locks[i]   = LOCKED;
-			printf("%d - Locker %d is locked.\n",id,i);
+			mr->locks [i]  = LOCKED;
 			(mr->lockers_in_use)++;
-			printf("%d - Currently %d lockers are in use.\n",id,mr->lockers_in_use);
-			pthread_cond_signal(& (mr->lock_empty_condition));
-			pthread_mutex_unlock(&(mr->lock_available_mutex));
+			printf("%d lockers are being used now\n",mr->lockers_in_use);
+
+			pthread_mutex_unlock(&(mr->locks_mutex));
 			break;
 		}
 	}
 
+	/* what locker do I have? */
 	int my_locker 	   = mr->claims[id];
 
-	// serialize the kvpair...using another kvpair!
-	struct kvpair * locker_contents = malloc(sizeof(struct kvpair));
+	/* serialize the kvpair...using another kvpair! */
+	struct kvpair *locker_contents = malloc(sizeof(struct kvpair));
 
-	// allocate the key and the value using the keysz and valuesz in kv
+	/* allocate the key and the value using the keysz and valuesz in kv */
 	locker_contents->key   = malloc(kv->keysz);
 	locker_contents->value = malloc(kv->valuesz);
  
+ 	/* copy the key and the value to the new kvpair */
 	locker_contents->key   = kv->key;
 	locker_contents->value = kv->value;
 
-	// update the keysz and valuesz in the locker contents
+	/* update keysz and valuesz in the new kvpair */
 	locker_contents->keysz   = kv->keysz;
 	locker_contents->valuesz = kv->valuesz;
 
-	// store the new locker contents in my locker
+	/* store the new locker contents in my locker */
 	mr->lockers[my_locker] = *locker_contents;
+
+	printf("%d\tProducing %p\n: %s - %d\n",id,locker_contents, (char*)(kv->key),*((int*)(kv->value)));
 	
-	//printf("Key is %d\n",(*((char*)(mr->lockers[my_locker]).key)));
-	//printf("Value is %d\n",(*((int*)(mr->lockers[my_locker]).value)));	
+	/* signal that a locker has data */
+	pthread_cond_signal(&(mr->locker_empty_cv));
 
-	// signal that there is something available to consume!
-
-	return SUCCESS;
+	// done
+	return 1;
 }
 
-int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv) {
-	
-	printf("Entered mr consume\n");
-
-	while (mr->claims[id] == UNCLAIMED)
+int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv)
+{
+	printf("%d - entered mr produce\n",id);
+	/* wait until the locker has data */
+	while(mr->claims[id] == UNCLAIMED)
 	{
-		// wait on a CV for the locker contents itself
-		pthread_cond_wait(&(mr->lock_empty_condition), &(mr->lock_available_mutex));
-		return 0;
+		printf("id = %d: Waiting for locker to be filled",id);
+		pthread_cond_wait(&(mr->locker_empty_cv), &(mr->locker_empty_mutex));
 	}
-
-	// lock the locker contents with a mutex
-	pthread_mutex_lock(& (mr->lock_available_mutex) );
-
-	int my_locker = mr->claims[id];
-
-	// unserialize (or not really) the data
-	kv = &(mr->lockers[my_locker]);
-
-	mr->locks[my_locker] = !(LOCKED);
-	(mr->lockers_in_use)--;
-	mr->claims[id] = UNCLAIMED;
-
-	pthread_cond_signal(& (mr->lock_available_condition));
-	pthread_mutex_unlock(& (mr->lock_available_mutex));
 	
-	return SUCCESS;
-}
-/*
+	/* what locker do I have? */
 	int my_locker = mr->claims[id];
-	for(int i = 0; i<locker_count; i++ ){
-		pthread_mutex_lock(&(mr->lock_available_mutex); // p1
-		while ((mr->lockers_in_use == 0)
-			pthread_cond_wait(&(mr->locker_empty_condition), &(mr->lock_available_mutex)); // p3
-		
-		mr->locks[my_locker] = !(LOCKED);
-		(mr->lockers_in_use)--;
-		mr->claims[id] = NO_CLAIM;
-		kv = lockers[my_locker]
+	printf("%d - I have a locker %d\n",id,my_locker);
 
-		pthread_cond_signal(& (mr->lock_available_condition));
-		pthread_mutex_unlock(& (mr->lock_available_mutex));
-		printf("%d\n", tmp);
-	}
+	/* unserialize (or not really) the data */
+	kv = &(mr->lockers[my_locker]);
+	printf("%d\tConsuming %p\n: %s - %d\n",id,kv,(char*)(kv->key),*((int*)(kv->value)));
+
+	/* mark the locker as unlocked and unclaimed*/
+	pthread_mutex_lock(&(mr->locks_mutex));
+	mr->locks[my_locker] = !(LOCKED);
+	printf("%d - Locker %d is now unloacked\n",id,my_locker);
+	(mr->lockers_in_use)--;
+	printf("%d - %d lockers are in use",id,mr->lockers_in_use);
+	mr->claims[id] = UNCLAIMED;
+	printf("%d - I dont have a locker",id);
+	pthread_mutex_unlock(&(mr->locks_mutex));
+
+	/* signal that a locker is now empty */
+	pthread_cond_signal(&(mr->locker_full_cv));
+	
+	// done
+	return 1;
 }
-*/
-/*
-int my_map (struct map_reduce *mr, int infd, int id, int nmaps){
-	FILE *fpin = fdopen(infd, "r");	
-	//create the kaey value pair
-	struct kvpair *my_kvpair = malloc(sizeof(struct kvpair));
-	//read till space character
-	if ((char currChar = fgetc (fpin)) != ' ' &&  currChar != EOF)
-		my_kvpair->key = currChar;
-		my_kvpair->value = 1;
-	}
-	//call mr_produce
-	int retval = mr_produce (*mr, id, *my_kvpair);
-	//close file
-	close(infd);
-	if (retval != SUCCESS){
-		printf("Error in mr produce.");
-		return -1;
-	}
-	//return 0 if successful else failed
-	return 0;
-}
-
-int my_reduce (struct map_reduce *mr, int outfd, int nmaps){
-	FILE *fout = fdopen(outfd,"w");
-}
-*/
-
-/* for testing purposes */
-//int main(){
-
-	/* test 1 - no map/reduce functions yet */
-
-/*	struct map_reduce * mr = mr_create(NULL, NULL, 8, 8);
-
-	if (mr->map == NULL)
-		printf("Map function is NULL!\n");
-
-	if (mr->reduce == NULL)
-		printf("Reduce function is NULL!\n");
-
-	printf("threads: %d\n", mr->threads);
-	printf("bufsize: %d\n", mr->buffer_size);
-
-	mr_start(mr, NULL, NULL);
-
-	mr_destroy(mr); 
-*/
-	/* test 2 - invalid numerical inputs */
-
-/*	struct map_reduce * ms = mr_create(NULL, NULL, -1, 8);
-
-	if (ms == NULL)
-		printf("map_reduce is NULL!\n");
-
-	mr_destroy(ms); 
-*/
-/*
-	char *inpath = "/home/ugrads/tjb5698/473/Lab4/lab4/testfile.txt" ;
-	char *outpath = "/home/ugrads/tjb5698/473/Lab4/lab4/output.txt" ;
-	iofilefn(inpath, outpath);
-*/	
-
-//	return 0;
-//}

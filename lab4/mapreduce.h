@@ -29,6 +29,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+struct map_reduce;
+
 /*
  * Type aliases for callback function pointers.  These are functions you will be
  * passed by the caller.  All of them will return 0 to indicate success and
@@ -66,7 +68,8 @@ typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
  * not manipulate it in any way other than passing its pointer back to your
  * functions.
  */
-struct map_reduce {
+struct map_reduce
+{
     /* pointers to map and reduce functions */
     map_fn          map;
     reduce_fn       reduce;
@@ -76,8 +79,8 @@ struct map_reduce {
     int             reduce_count;
 
     /* pointers to map and reduce threads   */
-    pthread_t     * mapThreads;
-    pthread_t     * reduceThread;
+    pthread_t      *mapThreads;
+    pthread_t      *reduceThread;
 
     /* buffer size in bytes     */
     int             buffer_size;
@@ -85,24 +88,40 @@ struct map_reduce {
     /* shared lockers (buffers) */
     int             locker_count;
     int             lockers_in_use;
-    int           * claims;
-    struct kvpair * lockers;
-    bool          * locks;
+    int            *claims;
+    struct kvpair  *lockers;
+    bool           *locks;
 
     /* output file descriptor */
     int outfd;
 
-    /* synchronization primitives */
-    pthread_mutex_t mrop_mutex;
-    pthread_cond_t  mrop_complete_condition;
+    /* number of maps complete */
+    int             nmaps_done;
 
-    /* synchronization primitives */
-    pthread_mutex_t lock_available_mutex;
-    pthread_cond_t  lock_available_condition;
-    pthread_cond_t  lock_empty_condition;
+    /* mutex for nmaps_done */
+    pthread_mutex_t nmaps_done_mutex;
 
-    /* */
-    int             map_status;
+    /* mutex for locks array */
+    pthread_mutex_t locks_mutex;
+
+    /* is the map stage done?  */
+    pthread_mutex_t map_complete_mutex;
+    pthread_cond_t  map_complete_cv;
+
+    /* is the reduce stage done? */
+    pthread_mutex_t mapreduce_complete_mutex;
+    pthread_cond_t  mapreduce_complete_cv;
+
+    /* is a locker available? */
+    pthread_mutex_t locker_full_mutex;
+    pthread_cond_t  locker_full_cv;
+
+    /* is a locker available? */
+    pthread_mutex_t locker_empty_mutex;
+    pthread_cond_t  locker_empty_cv;
+
+    /* status code for mapreduce operation */
+    int             status_code;
 };
 
 /**
