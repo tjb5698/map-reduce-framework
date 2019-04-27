@@ -8,7 +8,8 @@ earnedPoints=0
 availablePoints=0
 
 # set up trap so we can kill process after it starts running with ctrl-C (work around for using timeout)
-trap 'exit' INT
+trap 'kill -s INT $pid ; exit' INT
+
 
 # make the project first
 if make
@@ -18,7 +19,7 @@ then
   rm -r output
 
   # read test cases line by line
-  while read testCase ; do
+  while read -r testCase ; do
     testCaseArray=(${testCase})
 
     # get test case parameters
@@ -46,9 +47,10 @@ then
     echo "  ${command}"
 
     # run command (with time limit)
-    testCommand="{ eval \"${command}\" ; } &> ${outFile}"
+    testCommand="{ eval \"${command}\" ; } &> /dev/null"
     timeout "${testMaxTime}" bash -c "${testCommand}" &
-    wait $!
+    pid=$!
+    wait $pid
     timedout=$?
 
     failed=1

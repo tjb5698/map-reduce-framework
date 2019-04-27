@@ -112,6 +112,14 @@ struct map_reduce
     pthread_mutex_t mapreduce_complete_mutex;
     pthread_cond_t  mapreduce_complete_cv;
 
+    /* is an empty locker available to produce? */
+    pthread_mutex_t empty_locker_available_mutex;
+    pthread_cond_t  empty_locker_available_cv;
+
+    /* is a locker with data available to consume? */
+    pthread_mutex_t locker_contents_available_mutex;
+    pthread_cond_t  locker_contents_available_cv;
+
     /* is a locker available? */
     pthread_mutex_t locker_full_mutex;
     pthread_cond_t  locker_full_cv;
@@ -119,6 +127,9 @@ struct map_reduce
     /* is a locker available? */
     pthread_mutex_t locker_empty_mutex;
     pthread_cond_t  locker_empty_cv;
+
+    pthread_mutex_t reduce_done_mutex;
+    pthread_cond_t  reduce_done_cv;
 
     /* status code for mapreduce operation */
     int             status_code;

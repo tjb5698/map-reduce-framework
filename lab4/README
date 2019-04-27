@@ -1,0 +1,54 @@
+Name: Trishita Bhattacharya
+Email: tjb5698
+Name:
+Email:
+
+Concurrency Mechanisms:
+Out of the three common mechanisms, the one used in this project is multithreading/ multiprogramming. This mechanism invoves multiple threads or processes working 'simultaneously' on a single processor by switching between processes or threads.
+
+
+Producer-Consumer Problem:
+Decided to use condition variables. 
+
+For producer, the first condition variable used was to wait for an empty buffer space to become available. Once a buffer space is available, then search for the empty buffer space and assign a lock to the space and label it as being 'claimed' by that particular thread . Next, serialize the kvpair...using another kvpair! Allocate the key and the value using the keysz and valuesz in kv and copied+updated the key and the value and keysz and value sz to the new kvpair. Stored the new buffer contents in the particular buffer space visited earlier. Lastly, send a  signal that some data is available to mr_consume.
+
+For consumer, the secind condition variable is used to wait until atleast one of the buffer spaces has data. Keep a track of the selected buffer space and unserialize the data. Mark the buffer space as unlocked and unclaimed for other threads. Lastly, send a signal to mr_produce that a buffer space is now empty.
+
+Known Bugs:
+- The output file has incorrect text. the transfer between kv and buffer work fine but inconsistencies caused by tead of fopen()
+- The thread gets stuck in a wait function in mr_consume after going through all the mapper threads are done running
+
+Comments:
+Any other comments you have regarding your project.
+
+Statistics (Use microseconds):
+@Test: 0, perf-eval.txt, 1, 100, <min>
+@Test: 1, perf-eval.txt, 2, 100, <min>
+@Test: 2, perf-eval.txt, 4, 100, <min>
+@Test: 3, perf-eval.txt, 8, 100, <min>
+@Test: 4, perf-eval.txt, 16, 100, <min>
+@Test: 5, perf-eval.txt, 32, 100, <min>
+@Test: 6, perf-eval.txt, 64, 100, <min>
+@Test: 7, perf-eval.txt, 1, 1000, <min>
+@Test: 8, perf-eval.txt, 2, 1000, <min>
+@Test: 9, perf-eval.txt, 4, 1000, <min>
+@Test: 10, perf-eval.txt, 8, 1000, <min>
+@Test: 11, perf-eval.txt, 16, 1000, <min>
+@Test: 12, perf-eval.txt, 32, 1000, <min>
+@Test: 13, perf-eval.txt, 64, 1000, <min>
+@Test: 14, perf-eval.txt, 1, 10000, <min>
+@Test: 15, perf-eval.txt, 2, 10000, <min>
+@Test: 16, perf-eval.txt, 4, 10000, <min>
+@Test: 17, perf-eval.txt, 8, 10000, <min>
+@Test: 18, perf-eval.txt, 16, 10000, <min>
+@Test: 19, perf-eval.txt, 32, 10000, <min>
+@Test: 20, perf-eval.txt, 64, 10000, <min>
+
+Performance Evaluation:
+The expected performance with respects to varying no. of threads would be that the completion time initially goes down exponentially as more threads are created. However, after a certain point it might start to increase slightly again because of synchronisation (contentions for locks,etc.)
+In case of buffer size, I expect the completion time to go down has the buffer size increases since small buffers mean more contention between the threads over locks and the consumer has to wait longer.
+
+Sources Consulted:
+Operating Systems: Three Easy Pieces by Profs. Remzi Arpaci-Dusseau and ndrea Arpaci-Dusseau
+https://darkdust.net/files/GDB%20Cheat%20Sheet.pdf
+stackoverflow
